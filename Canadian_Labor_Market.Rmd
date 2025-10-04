@@ -1,0 +1,1249 @@
+---
+title: "Canada Housing Market"
+author: "Gabi Friedman"
+date: "2024-12-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Abstract Questions:
+
+-   How do full-time and part-time employment patterns differ by sex within each province?
+
+-   Do certain provinces show local economic weaknesses, and if so, what are the drivers?
+
+-   If we find evidence of confounding variables, what role might public policy, dominant industries, the distribution of workers by sex across industries, or broader issues of gender equity in Canadian workplaces and culture play?
+
+-   Can demographic differences help explain variation in employment rates across provinces?
+
+Through these questions, we aimed to uncover patterns that link demographics to employment rates in Canada. The analysis in our paper highlighted broader findings about long-term trends and seasonality in employment, as well as significant differences in patterns between provinces and across sexes over time. The code below addresses some, but of course not all, of our questions.
+
+# Data
+
+```{r, echo=FALSE}
+library(readr)
+library(forecast)
+library(ggplot2)
+library(TSEntropies)
+library(nonlinearTseries)
+
+# add your path here
+# setwd()
+
+example_data<-read.csv("example_data.csv", header = TRUE)
+canada <- example_data
+```
+
+## Subsets
+
+Example: Ontario
+
+```{r, echo=FALSE}
+
+# begin by subsetting by province - uncomment subsets
+
+#Subsets -------
+alberta_subset=canada[,1:4]
+# head(alberta_subset)
+
+bc_subset=canada[,1:5]
+bc_subset=bc_subset[,-4]
+# head(bc_subset)
+
+manitoba_subset=canada[,1:6]
+manitoba_subset=manitoba_subset[,-4:-5]
+# head(manitoba_subset)
+
+newb_subset=canada[,1:7]
+newb_subset=newb_subset[,-4:-6]
+# head(newb_subset)
+
+newfla_subset=canada[,1:8]
+newfla_subset=newfla_subset[,-4:-7]  
+# head(newfla_subset)
+
+novsko_subset=canada[,1:9]
+novsko_subset=novsko_subset[,-4:-8]
+# head(novsko_subset)
+
+ontario_subset=canada[,1:10]
+ontario_subset=ontario_subset[,-4:-9]
+head(ontario_subset)
+
+prince_subset=canada[,1:11]
+prince_subset=prince_subset[,-4:-10]
+# head(prince_subset)  
+
+quebec_subset=canada[,1:12]
+quebec_subset=quebec_subset[,-4:-11]
+# head(quebec_subset)
+  
+sask_subset=canada[,1:13]
+sask_subset=sask_subset[,-4:-12]
+# head(sask_subset)
+```
+
+## Total
+
+### Employee Count
+
+```{r, echo=FALSE}
+
+# Create total employee count by province in preparation to compare count vs. proportion time series.
+
+# subset
+canada_total <- subset(canada,variable=="Employment" & sex=="Both sexes")
+
+# provincial counts
+alberta_total=canada_total[,4]
+bc_total=canada_total[,5]
+manitoba_total=canada_total[,6]
+newb_total=canada_total[,7]
+newfla_total=canada_total[,8]
+novsco_total=canada_total[,9]
+ontario_total=canada_total[,10]
+prince_total=canada_total[,11]
+quebec_total=canada_total[,12]
+sask_total=canada_total[,13]
+
+# first time series of provincial counts
+totaldata <- ts(
+  cbind(
+    Alberta = alberta_total, 
+    "British Columbia" = bc_total, 
+    Manitoba = manitoba_total, 
+    "New Brunswick" = newb_total, 
+    Newfoundland = newfla_total, 
+    "Nova Scotia" = novsco_total, 
+    Ontario = ontario_total, 
+    "Prince Edward Island" = prince_total, 
+    Quebec = quebec_total, 
+    Saskatchewan = sask_total
+  ),
+  start = c(1976, 1), 
+  frequency = 12
+)
+
+# create total count
+canada_sum <- alberta_total + bc_total + manitoba_total + newb_total + newfla_total + novsco_total + ontario_total + prince_total + quebec_total + sask_total
+
+# include total count in new time series object
+totaldata2 <- ts(
+  cbind(
+    Alberta = alberta_total, 
+    "British Columbia" = bc_total, 
+    Manitoba = manitoba_total, 
+    "New Brunswick" = newb_total, 
+    Newfoundland = newfla_total, 
+    "Nova Scotia" = novsco_total, 
+    Ontario = ontario_total, 
+    "Prince Edward Island" = prince_total, 
+    Quebec = quebec_total, 
+    Saskatchewan = sask_total,
+    Total = canada_sum
+  ),
+  start = c(1976, 1), 
+  frequency = 12
+)
+
+# review cluster as part of EDA
+library(TSclust)
+dissimilarity=diss(totaldata2,METHOD="COR")
+hc.dpred <- hclust(dissimilarity)
+
+# cluster dendogram
+plot(hc.dpred,main="Cluster dendogram, province employment, correlation distance")
+
+
+# plot the count time series:
+
+# on one plot (for Appendix B1a and Fig.3)
+autoplot(totaldata)+ggtitle("Canadian Employment Count")+
+  ylab('Count of Employment')
+
+# dataframe prep for separate plots (for slides)
+library(dplyr)
+library(tidyr)
+totaldata_df <- as.data.frame(totaldata) %>%
+  mutate(Time = time(totaldata)) %>%
+  pivot_longer(
+    cols = -Time, 
+    names_to = "Province", 
+    values_to = "Proportion"
+  )
+
+# on separate plots
+ggplot(totaldata_df, aes(x = Time, y = Proportion, color = Province)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~ Province, scales = "free_y",ncol=2) +
+  ggtitle("Per-Province Count of Canadian Employment") +
+  xlab("Year") +
+  ylab("Employee Count") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 10)
+  )
+```
+
+### Proportion of Workforce
+
+```{r, echo=FALSE}
+
+# Create employee proportions by province in preparation to compare count vs. proportion time series.
+prop.alberta <- alberta_total / canada_sum
+prop.bc <- bc_total / canada_sum
+prop.manitoba <- manitoba_total / canada_sum
+prop.newb <- newb_total / canada_sum
+prop.newfla <- newfla_total / canada_sum
+prop.novsco <- novsco_total / canada_sum
+prop.ontario <- ontario_total / canada_sum
+prop.prince <- prince_total / canada_sum
+prop.quebec <- quebec_total / canada_sum
+prop.sask <- sask_total / canada_sum
+
+# Create proportions time series object
+prop_totaldata <- ts(
+  cbind(
+    Alberta = prop.alberta, 
+    "British Columbia" = prop.bc, 
+    Manitoba = prop.manitoba, 
+    "New Brunswick" = prop.newb, 
+    Newfoundland = prop.newfla, 
+    "Nova Scotia" = prop.novsco, 
+    Ontario = prop.ontario, 
+    "Prince Edward Island" = prop.prince, 
+    Quebec = prop.quebec, 
+    Saskatchewan = prop.sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the proportion time series on one plot (for Appendix B1a):
+autoplot(prop_totaldata)+ggtitle("Canadian Employment Rate")+
+  ylab('Proportion of Employment')
+
+# dataframe prep for separate plots (for slides)
+library(tidyr)
+prop_df <- as.data.frame(prop_totaldata) %>%
+  mutate(Time = time(prop_totaldata)) %>%
+  pivot_longer(
+    cols = -Time, 
+    names_to = "Province", 
+    values_to = "Proportion"
+  )
+
+# on separate plots
+ggplot(prop_df, aes(x = Time, y = Proportion, color = Province)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~ Province, scales = "free_y",ncol=2) +
+  ggtitle("Per-Province Proportion of Canadian Employment") +
+  xlab("Year") +
+  ylab("Proportion of Canadian Employment") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 10)
+  )
+```
+
+## Part Time
+
+### General
+
+#### Employee Count
+
+```{r, echo=FALSE}
+
+# Create part-time employee count by province in preparation to compare count vs. proportion time series.
+canada_pt_total <- subset(canada,variable=="Part-time employment" & sex=="Both sexes")
+
+# subset by province
+pt_alberta=canada_pt_total[,4]
+pt_bc=canada_pt_total[,5]
+pt_manitoba=canada_pt_total[,6]
+pt_newb=canada_pt_total[,7]
+pt_newfla=canada_pt_total[,8]
+pt_novsco=canada_pt_total[,9]
+pt_ontario=canada_pt_total[,10]
+pt_prince=canada_pt_total[,11]
+pt_quebec=canada_pt_total[,12]
+pt_sask=canada_pt_total[,13]
+
+# first time series of provincial counts for part-time workers
+pt_totaldata <- ts(
+  cbind(
+    Alberta = pt_alberta, 
+    "British Columbia" = pt_bc, 
+    Manitoba = pt_manitoba, 
+    "New Brunswick" = pt_newb, 
+    Newfoundland = pt_newfla, 
+    "Nova Scotia" = pt_novsco, 
+    Ontario = pt_ontario, 
+    "Prince Edward Island" = pt_prince, 
+    Quebec = pt_quebec, 
+    Saskatchewan = pt_sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the count time series on one plot (for Appendix B1b)
+autoplot(pt_totaldata)+ggtitle("Canadian Part-Time Employment Count")+
+  ylab('Count of Part-Time Employment')
+```
+
+#### Proportion of Total Part-Time Workers
+
+```{r, echo=FALSE}
+# What proportion of Canadian Part-time workers work in each province?
+
+# create total for part-time workers
+pt_sum=pt_alberta+pt_bc+pt_manitoba+pt_newb+pt_newfla+pt_novsco+pt_ontario+pt_prince+pt_quebec+pt_sask
+
+# create provincial proportions for part-time workers
+prop_pt.alberta <- pt_alberta/pt_sum
+prop_pt.bc <- pt_bc/pt_sum
+prop_pt.manitoba <- pt_manitoba/pt_sum
+prop_pt.newb <- pt_newb/pt_sum
+prop_pt.newfla <- pt_newfla/pt_sum
+prop_pt.novsco <- pt_novsco/pt_sum
+prop_pt.ontario <- pt_ontario/pt_sum
+prop_pt.prince <- pt_prince/pt_sum
+prop_pt.quebec <- pt_quebec/pt_sum
+prop_pt.sask <- pt_sask/pt_sum
+
+# create proportions time series object for part-time workers by province
+prop_pt.data <- ts(
+  cbind(
+    Alberta = prop_pt.alberta, 
+    "British Columbia" = prop_pt.bc, 
+    Manitoba = prop_pt.manitoba, 
+    "New Brunswick" = prop_pt.newb, 
+    Newfoundland = prop_pt.newfla, 
+    "Nova Scotia" = prop_pt.novsco, 
+    Ontario = prop_pt.ontario, 
+    "Prince Edward Island" = prop_pt.prince, 
+    Quebec = prop_pt.quebec, 
+    Saskatchewan = prop_pt.sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the proportions time series on one plot (for Appendix B1b)
+autoplot(prop_pt.data)+ggtitle("Canadian Provincial Part-Time Employment Rate")+
+  ylab('Part-Time Employment Rate')
+
+# dataframe prep for separate plots (for Appendix B2b)
+library(tidyr)
+prop_pt_df <- as.data.frame(prop_pt.data) %>%
+  mutate(Time = time(prop_pt.data)) %>%
+  pivot_longer(
+    cols = -Time, 
+    names_to = "Province", 
+    values_to = "Proportion"
+  )
+
+# on separate plots
+ggplot(prop_pt_df, aes(x = Time, y = Proportion, color = Province)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~ Province, scales = "free_y",ncol=2) +
+  ggtitle("Per-Province Proportion of Canadian Part-Time Employment") +
+  xlab("Year") +
+  ylab("Proportion of Canadian Part-Time Employment") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 10)
+  )
+```
+
+## Full-Time
+
+### Employee Count
+
+```{r, echo=FALSE}
+# How many Canadian Full-time workers work in each province?
+
+# create total for full-time workers
+canada_ft_total <- subset(canada,variable=="Full-time employment" & sex=="Both sexes")
+
+# subset counts by province
+ft_alberta=canada_ft_total[,4]
+ft_bc=canada_ft_total[,5]
+ft_manitoba=canada_ft_total[,6]
+ft_newb=canada_ft_total[,7]
+ft_newfla=canada_ft_total[,8]
+ft_novsco=canada_ft_total[,9]
+ft_ontario=canada_ft_total[,10]
+ft_prince=canada_ft_total[,11]
+ft_quebec=canada_ft_total[,12]
+ft_sask=canada_ft_total[,13]
+
+# create the provincial count time series object for full-time workers
+ft_totaldata <- ts(
+  cbind(
+    ft_alberta, 
+    ft_bc, 
+    ft_manitoba, 
+    ft_newb, 
+    ft_newfla, 
+    ft_novsco, 
+    ft_ontario, 
+    ft_prince, 
+    ft_quebec, 
+    ft_sask
+  ),
+  start = c(1976, 1), 
+  frequency = 12
+)
+
+# label provinces
+colnames(ft_totaldata) <- c(
+  "Alberta", 
+  "British Columbia", 
+  "Manitoba", 
+  "New Brunswick", 
+  "Newfoundland", 
+  "Nova Scotia", 
+  "Ontario", 
+  "Prince Edward Island", 
+  "Quebec", 
+  "Saskatchewan"
+)
+
+# plot the counts time series on one plot (for Appendix B1c)
+autoplot(ft_totaldata)+ggtitle("Canadian Full-Time Employment Count")+
+  ylab('Count of Full-Time Employment')+scale_color_discrete(name = "Province")
+
+# dataframe prep for separate plots (for slides)
+library(dplyr)
+library(tidyr)
+ft_totaldata_df <- as.data.frame(ft_totaldata) %>%
+  mutate(Time = time(ft_totaldata)) %>%
+  pivot_longer(
+    cols = -Time, 
+    names_to = "Province", 
+    values_to = "Proportion"
+  )
+
+# on separate plots
+ggplot(ft_totaldata_df, aes(x = Time, y = Proportion, color = Province)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~ Province, scales = "free_y",ncol=2) +
+  ggtitle("Per-Province Count of Canadian Full-Time Employment") +
+  xlab("Year") +
+  ylab("Counts of Canadian Full-Time Employment") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 10)
+  )
+```
+
+### Proportion of Total Full-Time Workers
+
+```{r, echo=FALSE}
+
+# What proportion of Canadian full-time workers work in each province?
+
+# create total for full-time workers
+ft_sum=ft_alberta+ft_bc+ft_manitoba+ft_newb+ft_newfla+ft_novsco+ft_ontario+ft_prince+ft_quebec+ft_sask
+
+# provincial proportions for full-time workers
+prop_ft.alberta <- ft_alberta/ft_sum
+prop_ft.bc <- ft_bc/ft_sum
+prop_ft.manitoba <- ft_manitoba/ft_sum
+prop_ft.newb <- ft_newb/ft_sum
+prop_ft.newfla <- ft_newfla/ft_sum
+prop_ft.novsco <- ft_novsco/ft_sum
+prop_ft.ontario <- ft_ontario/ft_sum
+prop_ft.prince <- ft_prince/ft_sum
+prop_ft.quebec <- ft_quebec/ft_sum
+prop_ft.sask <- ft_sask/ft_sum
+
+# proportions time series object for full-time workers by province
+prop_ft.data <- ts(
+  cbind(
+    Alberta = prop_ft.alberta, 
+    "British Columbia" = prop_ft.bc, 
+    Manitoba = prop_ft.manitoba, 
+    "New Brunswick" = prop_ft.newb, 
+    Newfoundland = prop_ft.newfla, 
+    "Nova Scotia" = prop_ft.novsco, 
+    Ontario = prop_ft.ontario, 
+    "Prince Edward Island" = prop_ft.prince, 
+    Quebec = prop_ft.quebec, 
+    Saskatchewan = prop_ft.sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the proportions  time series on one plot (for Appendix B1c)
+autoplot(prop_ft.data)+ggtitle("Canadian Full-Time Employment Rate")+
+  ylab('Proportion of Full-Time Employment')
+
+# dataframe prep for separate plots (for Appendix B2a)
+library(dplyr)
+library(tidyr)
+prop_ft.data_df <- as.data.frame(prop_ft.data) %>%
+  mutate(Time = time(prop_ft.data)) %>%
+  pivot_longer(
+    cols = -Time, 
+    names_to = "Province", 
+    values_to = "Proportion"
+  )
+
+# on separate plots
+ggplot(prop_ft.data_df, aes(x = Time, y = Proportion, color = Province)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~ Province, scales = "free_y",ncol=2) +
+  ggtitle("Per-Province Proportion of Canadian Full-Time Employment") +
+  xlab("Year") +
+  ylab("Proportion of Canadian Full-Time Employment") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 10)
+  )
+```
+
+## Female
+
+### Employee Count
+
+```{r, echo=FALSE}
+
+# How many Canadian female workers work in each province?
+
+# subset by female sex
+canada_f_total <-subset(canada,variable=="Employment" & sex=="Females")
+
+# subset female counts by province
+f_alberta=canada_f_total[,4]
+f_bc=canada_f_total[,5]
+f_manitoba=canada_f_total[,6]
+f_newb=canada_f_total[,7]
+f_newfla=canada_f_total[,8]
+f_novsco=canada_f_total[,9]
+f_ontario=canada_f_total[,10]
+f_prince=canada_f_total[,11]
+f_quebec=canada_f_total[,12]
+f_sask=canada_f_total[,13]
+
+# time series object with female counts by province
+f_totaldata <- ts(
+  cbind(
+    Alberta = f_alberta, 
+    "British Columbia" = f_bc, 
+    Manitoba = f_manitoba, 
+    "New Brunswick" = f_newb, 
+    Newfoundland = f_newfla, 
+    "Nova Scotia" = f_novsco, 
+    Ontario = f_ontario, 
+    "Prince Edward Island" = f_prince, 
+    Quebec = f_quebec, 
+    Saskatchewan = f_sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the counts time series on one plot (for Appendix B1d)
+autoplot(f_totaldata)+ggtitle("Canadian Female Employment")+
+  ylab('Female Employment')
+```
+
+### Rate of Female Workers per Province
+
+```{r, echo=FALSE}
+# What proportion of Canadian female workers work in each province?
+
+# create total for female sex
+f_sum=f_alberta+f_bc+f_manitoba+f_newb+f_newfla+f_novsco+f_ontario+f_prince+f_quebec+f_sask
+
+# create provincial ratios for female workers
+prop_f.alberta <- f_alberta/f_sum
+prop_f.bc <- f_bc/f_sum
+prop_f.manitoba <- f_manitoba/f_sum
+prop_f.newb <- f_newb/f_sum
+prop_f.newfla <- f_newfla/f_sum
+prop_f.novsco <- f_novsco/f_sum
+prop_f.ontario <- f_ontario/f_sum
+prop_f.prince <- f_prince/f_sum
+prop_f.quebec <- f_quebec/f_sum
+prop_f.sask <- f_sask/f_sum
+
+# create proportions time series object for female workers by province
+prop_f.data <- ts(
+  cbind(
+    Alberta = prop_f.alberta, 
+    "British Columbia" = prop_f.bc, 
+    Manitoba = prop_f.manitoba, 
+    "New Brunswick" = prop_f.newb, 
+    Newfoundland = prop_f.newfla, 
+    "Nova Scotia" = prop_f.novsco, 
+    Ontario = prop_f.ontario, 
+    "Prince Edward Island" = prop_f.prince, 
+    Quebec = prop_f.quebec, 
+    Saskatchewan = prop_f.sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the proportions time series on one plot (for Appendix B1d)
+autoplot(prop_f.data)+ggtitle("Canadian Female Employment Rate")+
+  ylab('Proportion of Female Employment')
+
+# dataframe prep for separate plots (for Appendix B2c)
+library(tidyr)
+prop_f_df <- as.data.frame(prop_f.data) %>%
+  mutate(Time = time(prop_f.data)) %>%
+  pivot_longer(
+    cols = -Time, 
+    names_to = "Province", 
+    values_to = "Proportion"
+  )
+
+# on separate plots
+ggplot(prop_f_df, aes(x = Time, y = Proportion, color = Province)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~ Province, scales = "free_y",ncol=2) +
+  ggtitle("Per-Province Proportion of Canadian Female Workforce") +
+  xlab("Year") +
+  ylab("Proportion of Canadian Female Workforce") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 10)
+  )
+```
+
+## Male
+
+### Employee Count
+
+```{r, echo=FALSE}
+
+# How many Canadian male workers work in each province?
+
+# subset by male sex
+canada_m_total <-subset(canada,variable=="Employment" & sex=="Males")
+
+# subset male counts by province
+m_alberta=canada_m_total[,4]
+m_bc=canada_m_total[,5]
+m_manitoba=canada_m_total[,6]
+m_newb=canada_m_total[,7]
+m_newfla=canada_m_total[,8]
+m_novsco=canada_m_total[,9]
+m_ontario=canada_m_total[,10]
+m_prince=canada_m_total[,11]
+m_quebec=canada_m_total[,12]
+m_sask=canada_m_total[,13]
+
+# time series object with male counts by province
+m_totaldata <- ts(
+  cbind(
+    Alberta = m_alberta, 
+    "British Columbia" = m_bc, 
+    Manitoba = m_manitoba, 
+    "New Brunswick" = m_newb, 
+    Newfoundland = m_newfla, 
+    "Nova Scotia" = m_novsco, 
+    Ontario = m_ontario, 
+    "Prince Edward Island" = m_prince, 
+    Quebec = m_quebec, 
+    Saskatchewan = m_sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the counts time series on one plot (for Appendix B1e)
+autoplot(m_totaldata)+ggtitle("Canadian Male Employment")+
+  ylab('Male Employment')
+```
+
+### Rate of Male Workers per Province
+
+```{r, echo=FALSE}
+# What proportion of Canadian male workers work in each province?
+
+# create total for male sex
+m_sum=m_alberta+m_bc+m_manitoba+m_newb+m_newfla+m_novsco+m_ontario+m_prince+m_quebec+m_sask
+
+# create provincial ratios for male workers
+prop_m.alberta <- m_alberta/m_sum
+prop_m.bc <- m_bc/m_sum
+prop_m.manitoba <- m_manitoba/m_sum
+prop_m.newb <- m_newb/m_sum
+prop_m.newfla <- m_newfla/m_sum
+prop_m.novsco <- m_novsco/m_sum
+prop_m.ontario <- m_ontario/m_sum
+prop_m.prince <- m_prince/m_sum
+prop_m.quebec <- m_quebec/m_sum
+prop_m.sask <- m_sask/m_sum
+
+# create proportions time series object for male workers by province
+prop_m.data <- ts(
+  cbind(
+    Alberta = prop_m.alberta, 
+    "British Columbia" = prop_m.bc, 
+    Manitoba = prop_m.manitoba, 
+    "New Brunswick" = prop_m.newb, 
+    Newfoundland = prop_m.newfla, 
+    "Nova Scotia" = prop_m.novsco, 
+    Ontario = prop_m.ontario, 
+    "Prince Edward Island" = prop_m.prince, 
+    Quebec = prop_m.quebec, 
+    Saskatchewan = prop_m.sask
+  ),
+  start = c(1976, 1), frequency = 12
+)
+
+# plot the proportions time series on one plot (for Appendix B1e)
+autoplot(prop_m.data)+ggtitle("Canadian Male Employment Rate")+
+  ylab('Proportion of Male Employment')
+
+# dataframe prep for separate plots (for Appendix B2d)
+library(tidyr)
+prop_m_df <- as.data.frame(prop_m.data) %>%
+  mutate(Time = time(prop_m.data)) %>%
+  pivot_longer(
+    cols = -Time, 
+    names_to = "Province", 
+    values_to = "Proportion"
+  )
+
+# on separate plots
+ggplot(prop_m_df, aes(x = Time, y = Proportion, color = Province)) +
+  geom_line(show.legend = F) +
+  facet_wrap(~ Province, scales = "free_y",ncol=2) +
+  ggtitle("Per-Province Proportion of Canadian Male Workforce") +
+  xlab("Year") +
+  ylab("Proportion of Canadian Male Workforce") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+    axis.text = element_text(size = 6),
+    axis.title = element_text(size = 12),
+    strip.text = element_text(size = 10)
+  )
+```
+
+## Comparison by Sex
+
+```{r, echo=FALSE}
+
+# For Fig.9: Ontario Employment Rates by Sex
+
+ontario_sex <- ts(
+  cbind(
+    "Ontario Male" = prop_m.ontario,"Ontario Female"= prop_f.ontario
+                 ),
+           
+           start = c(1976, 1), frequency = 12
+)
+
+autoplot(ontario_sex)+ggtitle("Ontario Male and Female Employment Rates")+
+  ylab('Employment Rate')+
+theme(legend = "topright") +
+  labs(color = "Sex")
+```
+
+# Constrained Analyses
+
+## Granular (Ontario F)
+
+### Part-Time
+
+1) Proportions
+
+a) What proportion of part-time employees in Ontario are female?
+
+b) What proportion of all Ontario female workers are part-time?
+
+c) What proportion of all workers in Ontario are both female and part-time?
+
+2) Summary statistics
+
+3) Plots
+
+```{r, echo=FALSE}
+# Prepare with employment type subsets by gender: 
+
+# part-time female
+canada_pt_f_total <- subset(canada,variable=="Part-time employment" & sex=="Females")
+
+# full-time female
+canada_ft_f_total <- subset(canada,variable=="Full-time employment" & sex=="Females")
+
+
+# Further subset for Ontario:
+
+# part-time female
+pt_f_ontario=canada_pt_f_total[,10]
+
+# full-time female
+ft_f_ontario=canada_ft_f_total[,10]
+
+
+# 1st Time Series: proportion of all Ontario part-time workers who are female
+
+# subset
+prop_PT.f_ontario <- pt_f_ontario/pt_ontario
+
+# time-series object
+prop_PT.f_ontario.ts<- ts(prop_PT.f_ontario,start = c(1976,1),frequency = 12)
+
+# What proportion of part-time employees in Ontario are female? 
+SampEn(prop_PT.f_ontario.ts)  
+
+# outlier check
+# tsoutliers(prop_PT.f_ontario.ts) # none
+
+# summary
+summary(prop_PT.f_ontario.ts)
+
+
+# Female rate plot for Appendix B3 (Granular Proportions):
+
+autoplot(prop_PT.f_ontario.ts)+ggtitle("Female Employment Rate Among Part-Time Workers in Ontario")+
+  ylab('Female Employment Rate')
+
+
+# 2nd Time Series: proportion of all Ontario female workers who are part-time
+
+# subset
+prop_pt.F_ontario <- pt_f_ontario/f_ontario
+
+# time-series object
+prop_pt.F_ontario.ts<- ts(prop_pt.F_ontario,start = c(1976,1),frequency = 12)
+
+# What proportion of female employees in Ontario are part-time? 
+SampEn(prop_pt.F_ontario.ts)  
+
+# outlier check
+# tsoutliers(prop_pt.F_ontario.ts) # none
+
+# summary
+summary(prop_pt.F_ontario.ts)
+
+
+# Part-time rate plot for Appendix B3a (Granular Proportions):
+
+autoplot(prop_pt.F_ontario.ts)+ggtitle("Part-Time Employment Rate Among Female Workers in Ontario")+
+  ylab('PT Employment Rate')
+
+
+# 3rd Time Series: proportion of all workers in Ontario who are both female and part-time workers
+
+# subset
+prop_pt.f_ontario <- pt_f_ontario/ontario_total
+
+# time-series object
+prop_pt.f_ontario.ts<- ts(prop_pt.f_ontario,start = c(1976,1),frequency = 12)
+
+# What proportion of all employees in Ontario are both female and part-time? 
+SampEn(prop_pt.f_ontario.ts)  
+
+# outlier check
+# tsoutliers(prop_pt.f_ontario.ts) # none
+
+# summary
+summary(prop_pt.f_ontario.ts)
+
+
+# Female part-time rate among full workforce - plot for Appendix B3 (Granular Proportions):
+
+autoplot(prop_pt.f_ontario.ts)+ggtitle("Ontario Workforce Female Part-Time Employment Rate")+ylab('Female PT Employment Rate')
+
+#patch the three plots into one for comparison using patchwork library
+library(patchwork)
+
+
+# define the plots
+
+# ONE: Ontario Workforce Female Part-Time Employment Rate
+plot1 <- autoplot(prop_pt.f_ontario.ts) +
+  ggtitle("Female Part-Time Employment Rate Among Ontario Workforce ") +
+  ylab('Female PT Rate') +
+  theme_minimal()
+
+# TWO: Part-Time Employment Rate Among Female Workers in Ontario
+plot2 <- autoplot(prop_pt.F_ontario.ts) +
+  ggtitle("Part-Time Employment Rate Among Female Workers in Ontario") +
+  ylab('PT Rate') +
+  theme_minimal()
+
+
+# THREE: Female Employment Rate Among Part-Time Workers in Ontario
+plot3 <- autoplot(prop_PT.f_ontario.ts) +
+  ggtitle("Female Employment Rate Among Part-Time Workers in Ontario") +
+  ylab('Female Rate') +
+  theme_minimal()
+
+
+# Combine the three plots into a single figure with 3 panels
+combined_plot <- plot1 / plot2 / plot3
+
+# Display the combined plot
+combined_plot
+```
+
+### Full-Time
+
+1) Proportions
+
+-   What proportion of full-time employees in Ontario are female?
+
+-   What proportion of all Ontario female workers are full-time?
+
+-   What proportion of all workers in Ontario are both female and full-time?
+
+2) Summary statistics
+
+3) Plots
+
+```{r, echo=FALSE}
+
+# Same process as above, now for full-time workers
+
+# 1st Time Series: proportion of all Ontario full-time workers who are female
+
+# subset
+prop_FT.f_ontario <- ft_f_ontario/ft_ontario
+
+# time-series object
+prop_FT.f_ontario.ts<- ts(prop_FT.f_ontario,start = c(1976,1),frequency = 12)
+
+# What proportion of female employees in Ontario are full-time? 
+SampEn(prop_FT.f_ontario.ts)  
+
+# outlier check
+# tsoutliers(prop_FT.f_ontario.ts) # none
+
+# summary
+summary(prop_FT.f_ontario.ts)
+
+# Female rate plot for Appendix B3b (Granular Proportions):
+autoplot(prop_FT.f_ontario.ts)+ggtitle("Female Employment Rate Among Full-Time Workers in Ontario")+
+  ylab('Female Employment Rate')
+
+
+# 2nd Time Series: proportion of all Ontario female workers who are full-time
+
+# subset
+prop_ft.F_ontario <- ft_f_ontario/f_ontario
+
+# time-series object
+prop_ft.F_ontario.ts<- ts(prop_ft.F_ontario,start = c(1976,1),frequency = 12)
+
+# What proportion of female employees in Ontario are full-time? 
+SampEn(prop_ft.F_ontario.ts)  
+
+# outlier check
+# tsoutliers(prop_ft.F_ontario.ts) # none
+
+# summary
+summary(prop_ft.F_ontario.ts)
+
+# Full-time rate plot for Appendix B3a (Granular Proportions):
+autoplot(prop_ft.F_ontario.ts)+ggtitle("Full-Time Employment Rate Among Female Workers in Ontario")+
+  ylab('FT Employment Rate')
+
+# 3rd Time Series: proportion of all workers in Ontario who are both female and full-time workers
+
+# subset
+prop_ft.f_ontario <- ft_f_ontario/ontario_total
+
+# time-series object
+prop_ft.f_ontario.ts<- ts(prop_ft.f_ontario,start = c(1976,1),frequency = 12)
+
+# What proportion of female employees in Ontario are full-time? 
+SampEn(prop_ft.f_ontario.ts) 
+
+# outlier check
+# tsoutliers(prop_ft.f_ontario.ts) # none
+
+# summary
+summary(prop_ft.f_ontario.ts)
+
+# Female full-time rate among full workforce - plot for Appendix B3b (Granular Proportions):
+
+autoplot(prop_ft.f_ontario.ts)+ggtitle("Ontario Workforce Female Full-Time Employment Rate")+ylab('Female FT Employment Rate')
+
+# patch the three plots into one for comparison using patchwork library
+library(patchwork)
+
+# define the plots
+
+# ONE: Ontario Workforce Female Full-Time Employment Rate
+plot1 <- autoplot(prop_ft.f_ontario.ts) +
+  ggtitle("Female Full-Time Employment Rate Among Ontario Workforce") +
+  ylab('Female FT Rate') +
+  theme_minimal()
+
+
+# TWO: Full-Time Employment Rate Among Female Workers in Ontario
+plot2 <- autoplot(prop_ft.F_ontario.ts) +
+  ggtitle("Full-Time Employment Rate Among Female Workers in Ontario") +
+  ylab('FT Rate') +
+  theme_minimal()
+
+# THREE: Female Employment Rate Among Full-Time Workers in Ontario
+plot3 <- autoplot(prop_FT.f_ontario.ts) +
+  ggtitle("Female Employment Rate Among Full-Time Workers in Ontario") +
+  ylab('Female Rate') +
+  theme_minimal()
+
+
+# Combine the three plots into a single figure with 3 panels
+combined_plot <- plot1 / plot2 / plot3
+
+# Display the combined plot
+combined_plot
+```
+
+## Modeling (Ontario F/Part-Time)
+
+```{r, echo=FALSE}
+# Revisiting Part-Time Employment Rate Among Female Workers in Ontario (Granular Plot):
+# This example is highlighted in the paper and final slides
+
+
+# moving average decomposition
+dec.prop_PT.f_ontario=decompose(prop_PT.f_ontario.ts)
+
+# strength
+1-var(dec.prop_PT.f_ontario$random,na.rm=TRUE)/var((dec.prop_PT.f_ontario$trend+dec.prop_PT.f_ontario$random),na.rm=TRUE)
+# trend: 0.8959216
+1-var(dec.prop_PT.f_ontario$random,na.rm=TRUE)/var((dec.prop_PT.f_ontario$seasonal+dec.prop_PT.f_ontario$random),na.rm=TRUE)
+# seasonality: 0.01131532
+
+# plotted 
+autoplot(dec.prop_PT.f_ontario)+
+  ggtitle("moving average decomposition of Part-Time Female Workers in Ontario") 
+
+# For model building:
+
+# Create split 
+tail(prop_PT.f_ontario.ts)
+prop_PT.f_ontario.train=window(prop_PT.f_ontario.ts, end=end(prop_PT.f_ontario.ts)-c(9,0))
+
+# STL decomposition of training set
+decomp.prop_PT.f_ontario=stl(prop_PT.f_ontario.train,s.window=13, robust=TRUE)
+
+# for Fig 17 in paper: Illogical STL with nonperiodic seasonality
+
+autoplot(decomp.prop_PT.f_ontario)+
+  ggtitle("stl decomp of Female Employment Rate for Ontario PT Workforce")
+
+# linearity check of training set
+nonlinearityTest(prop_PT.f_ontario.train) # 3 suggest linear, 3 nonlinear
+
+# ACF plots
+ggAcf(prop_PT.f_ontario.train,lag.max=24)
+ggPacf(prop_PT.f_ontario.train,lag.max=24)
+```
+
+```{r, echo=FALSE}
+# Model Building
+
+# non-transformed best ETS model
+untrans.ets=ets(prop_PT.f_ontario.train) 
+untrans.ets # M,N,N
+
+# transformation of time-series object
+BoxCox.lambda(prop_PT.f_ontario.train)
+
+# best ETS model on transformed time-series 
+trans.ets=ets(prop_PT.f_ontario.train,lambda = 1.106443)
+trans.ets # A,N,N
+
+# ARIMA model
+best.arima <- Arima(prop_PT.f_ontario.train) # ARIMA(0,0,0) with nonzero mean
+best.arima
+
+# naive model
+naive <- naive(prop_PT.f_ontario.train)
+
+# random walk
+randomwalk <- stl(prop_PT.f_ontario.train,s.window=13, robust=TRUE)
+
+# neural net
+best.neural<- nnetar(prop_PT.f_ontario.train)
+best.neural # NNAR(25,1,13)[12] 
+
+# bagged
+bm=baggedModel(prop_PT.f_ontario.train, bootstrapped_series = bld.mbb.bootstrap(prop_PT.f_ontario.train, 15))
+
+# log-transformed ETS 
+trans1.ets=ets(prop_PT.f_ontario.train,lambda = 0)
+```
+
+```{r, echo=FALSE}
+# to create Fig. 13 in paper comparing accuracy & MASE:
+
+a_ets<-accuracy(forecast(untrans.ets),prop_PT.f_ontario.ts)
+a_boxcox<-accuracy(forecast(trans.ets),prop_PT.f_ontario.ts)
+a_log<-accuracy(forecast(trans1.ets),prop_PT.f_ontario.ts) 
+a_arima<-accuracy(forecast(best.arima),prop_PT.f_ontario.ts)
+a_naive<-accuracy(forecast(naive),prop_PT.f_ontario.ts)
+a_randomwalk<-accuracy(forecast(randomwalk),prop_PT.f_ontario.ts)
+a_neural<-accuracy(forecast(best.neural),prop_PT.f_ontario.ts) # best so far
+a_bm<-accuracy(forecast(bm),prop_PT.f_ontario.ts)
+
+mase = matrix (0,9,3)
+mase[1,]=c("model","train MASE","test MASE")
+mase[2,]=c("naive",round(a_naive[1,6],4),round(a_naive[2,6],4))
+mase[3,]=c("randomwalk",round(a_randomwalk[1,6],4),round(a_randomwalk[2,6],4))
+mase[4,]=c("best ETS",round(a_ets[1,6],4),round(a_ets[2,6],4))
+mase[5,]=c("BoxCox ETS",round(a_boxcox[1,6],4),round(a_boxcox[2,6],4))
+mase[6,]=c("log-trans ETS",round(a_log[1,6],4),round(a_log[2,6],4))
+mase[7,]=c("best ARIMA",round(a_arima[1,6],4),round(a_arima[2,6],4))
+mase[8,]=c("best neural",round(a_neural[1,6],4),round(a_neural[2,6],4))
+mase[9,]=c("bagged",round(a_bm[1,6],4),round(a_bm[2,6],4))
+
+mase
+```
+
+```{r, echo=FALSE}
+
+# Plot comparisons
+
+# untransformed best ETS plot
+autoplot(prop_PT.f_ontario.train)+autolayer(forecast(untrans.ets,h=50))+ylab("Proportion of PT Workforce")+
+  ggtitle("Ontario Female Employment, best ETS")
+
+# Box-Cox transformed ETS plot
+autoplot(prop_PT.f_ontario.train)+autolayer(forecast(trans.ets,h=50))+ylab("Proportion of PT Workforce")+
+  ggtitle("Ontario Female Employment, Box-Cox")
+
+# log-transformed ETS plot
+autoplot(prop_PT.f_ontario.train)+autolayer(forecast(trans1.ets,h=50))+ylab("Proportion of PT Workforce")+
+  ggtitle("Ontario Female Employment, Log-transform")
+
+# bagged (Fig. 14 in paper)
+autoplot(prop_PT.f_ontario.train)+autolayer(fitted(bm))+autolayer(forecast(bm,h=50))+ylab("Proportion of PT Workforce")+
+  ggtitle("Ontario Female Employment, bagged")
+
+# plot of neural net (Fig. 15 in paper)
+autoplot(prop_PT.f_ontario.train)+autolayer(forecast(best.neural,h=50))+ylab("Female Proportion")+
+  ggtitle("Ontario PT Workforce, Neural Net")
+
+# comparing top models 
+
+# neural net plot vs. bagged (Fig. 16 in paper)
+autoplot(prop_PT.f_ontario.train)+autolayer(fitted(best.neural))+autolayer(forecast(best.neural,h=50))+autolayer(fitted(bm))+autolayer(forecast(bm,h=50))+
+  ylab("Proportion of PT Workforce")+
+  ggtitle("Ontario Female Employment: Real,Neural & Bagged")
+```
+
+```{r, echo=FALSE}
+# checking residuals
+checkresiduals(untrans.ets)
+checkresiduals(trans.ets)
+checkresiduals(trans1.ets)
+checkresiduals(best.arima)
+checkresiduals(naive)
+checkresiduals(best.neural) # (see slide 23)
+checkresiduals(bm)
+
+
+# retrospective accuracy analysis (for Fig 12, comparing absolute errors)
+
+tim.ser=prop_PT.f_ontario.train
+
+e.ets<-rep(0,length(tim.ser)-2)
+e.boxcox<-rep(0,length(tim.ser)-2)
+e.log<-rep(0,length(tim.ser)-2)
+e.arima<-rep(0,length(tim.ser)-2)
+e.net<-rep(0,length(tim.ser)-2)
+e.bagged<-rep(0,length(tim.ser)-2)
+
+
+for (s in 20:(length(tim.ser)-1))
+{
+  data=tim.ser[1:s]
+  p=length(forecast(ets(data),h=(length(tim.ser)-s))$mean)
+  
+  f.ets=forecast(ets(data),h=(length(tim.ser)-s))$mean[p]
+  e.ets[s]=abs(tim.ser[length(tim.ser)]-f.ets)
+  
+  f.boxcox=forecast(ets(data),lambda = 1.106443,biasadj=T,h=(length(tim.ser)-s))$mean[p]
+  e.boxcox[s]=abs(tim.ser[length(tim.ser)]-f.boxcox)
+  
+  f.log=forecast(ets(data),lambda = 0,biasadj=T,h=(length(tim.ser)-s))$mean[p]
+  e.log[s]=abs(tim.ser[length(tim.ser)]-f.log)
+  
+  f.arima=forecast(Arima(data,c(0,0,0)),h=(length(tim.ser)-s))$mean[p]
+  e.arima[s]=abs(tim.ser[length(tim.ser)]-f.arima)
+  
+  f.net=forecast(nnetar(data),h=(length(tim.ser)-s))$mean[p]
+  e.net[s]=abs(tim.ser[length(tim.ser)]-f.net)
+  
+  # 26 non-seasonal lags, 1 seasonal lag, 14 hidden neurons
+  
+  f.bagged=forecast(baggedModel(data, bootstrapped_series = bld.mbb.bootstrap(data, 15)),
+  h=(length(tim.ser)-s))$mean[p]
+  e.bagged[s]=abs(tim.ser[length(tim.ser)]-f.bagged)
+  
+}
+
+plot(seq(1,length(e.ets),1),e.ets,"p",pch=19,cex=0.6,main="Retrospective accuracy analysis on
+     rate of female workers in Ontario PT workforce",xlab="Size of training set = x+20",ylab="Retrospective absolute errors")
+points(seq(1,length(e.ets),1),e.ets,col="blue",pch=19,cex=0.6)
+points(seq(1,length(e.ets),1),e.boxcox,col="green",pch=19,cex=0.6)
+points(seq(1,length(e.ets),1),e.log,col="orange",pch=19,cex=0.6)
+points(seq(1,length(e.ets),1),e.arima,col="red",pch=19,cex=0.6)
+points(seq(1,length(e.ets),1),e.net,col="purple",pch=19,cex=0.6)
+points(seq(1,length(e.ets),1),e.bagged,col="yellow",pch=19,cex=0.6)
+
+
+legend("topright",bty = "n",c("ETS MNN","BoxCox","Log-Transformation","ARIMA00", "best NNET","bagged"),col=c("black","blue","green","orange", "red","purple","yellow"),lty=rep(1,6))
+```
+
+```{r, echo=FALSE}
+# further exploration of the bootstrap model:
+
+# forecasting the next 12 periods with bagged model
+bagged_forecast_1 <- forecast(bm, h = 24)
+
+# create a series for the forecast
+boot_series <- bld.mbb.bootstrap(prop_PT.f_ontario.train, 15)
+
+# create plots for each series
+autoplot(boot_series[[1]]) + ggtitle("Bootstrapped Series 1")
+autoplot(boot_series[[2]]) + ggtitle("Bootstrapped Series 2")
+autoplot(boot_series[[3]]) + ggtitle("Bootstrapped Series 2")
+autoplot(boot_series[[4]]) + ggtitle("Bootstrapped Series 2")
+autoplot(boot_series[[5]]) + ggtitle("Bootstrapped Series 2")
+autoplot(boot_series[[6]]) + ggtitle("Bootstrapped Series 2")
+autoplot(boot_series[[7]]) + ggtitle("Bootstrapped Series 2")
+autoplot(boot_series[[8]]) + ggtitle("Bootstrapped Series 2")
+autoplot(boot_series[[9]]) + ggtitle("Bootstrapped Series 2")
+
+# new bagged model using bootstrapped series (defined differently from prior bm model)
+bagged_model <- baggedModel(y = prop_PT.f_ontario.train, bootstrapped_series = boot_series)
+bagged_forecast_2 <- forecast(bagged_model, h = 36)
+```
+
+## Reflection
+
+As described on p. 17 of the final paper, the bagged model is preferred because bootstrap aggregation adapts to the data, offers greater flexibility, and avoids imposing a decreasing trend. Relative to the neural net, the bagged forecasts indicate that the series level—the proportion of Ontario part-time workers who are female—is unlikely to change substantially in the coming decade (≈26–27%). Given the high variability in the granular series (also evident in the attempted moving-average decomposition), bagging represents the most conservative choice.
+
+To support transparency and replication for this Github project, the code was restructured and annotated so others can follow the workflow and reproduce the results. This process underscored the importance of clarity in both modeling and communication, ensuring that the conclusions are not only accurate but also accessible for others to test, adapt, and extend (see p. 18 for conclusions and future suggestions).

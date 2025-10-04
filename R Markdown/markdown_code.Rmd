@@ -1,7 +1,7 @@
 ---
 title: "Canada Housing Market"
 author: "Gabi Friedman"
-date: "2024-12-15"
+date: "2024-12-15 - last updated 2025-10-03"
 output: html_document
 ---
 
@@ -33,7 +33,7 @@ library(nonlinearTseries)
 # add your path here
 # setwd()
 
-example_data<-read.csv("example_data.csv", header = TRUE)
+data<-read.csv("data.csv", header = TRUE)
 canada <- example_data
 ```
 
@@ -770,17 +770,21 @@ theme(legend = "topright") +
 
 ### Part-Time
 
-1) Proportions
+1)  Proportions
 
-a) What proportion of part-time employees in Ontario are female?
+<!-- -->
 
-b) What proportion of all Ontario female workers are part-time?
+a)  What proportion of part-time employees in Ontario are female?
 
-c) What proportion of all workers in Ontario are both female and part-time?
+b)  What proportion of all Ontario female workers are part-time?
 
-2) Summary statistics
+c)  What proportion of all workers in Ontario are both female and part-time?
 
-3) Plots
+<!-- -->
+
+2)  Summary statistics
+
+3)  Plots
 
 ```{r, echo=FALSE}
 # Prepare with employment type subsets by gender: 
@@ -906,7 +910,7 @@ combined_plot
 
 ### Full-Time
 
-1) Proportions
+1)  Proportions
 
 -   What proportion of full-time employees in Ontario are female?
 
@@ -914,9 +918,9 @@ combined_plot
 
 -   What proportion of all workers in Ontario are both female and full-time?
 
-2) Summary statistics
+2)  Summary statistics
 
-3) Plots
+3)  Plots
 
 ```{r, echo=FALSE}
 
@@ -1019,6 +1023,12 @@ combined_plot
 ```
 
 ## Modeling (Ontario F/Part-Time)
+
+1) Trend strength
+
+2) Seasonality strength
+
+3) Plots
 
 ```{r, echo=FALSE}
 # Revisiting Part-Time Employment Rate Among Female Workers in Ontario (Granular Plot):
